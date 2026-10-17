@@ -4,7 +4,7 @@ FROM eclipse-temurin:25-alpine AS build_image
 # Set the working directory in the container (A folder inside the container where the application will be stored).
 WORKDIR /app
 # Copy the jar file from the target directory to the container and rename it to app.jar. This is the jar file that will be run when the container starts.
-COPY target/grafana-0.0.1.jar app.jar
+COPY target/*.jar app.jar
 # Expose the port that the application will run on.
 # In this case, we are exposing port 8081, which is the default port for Spring Boot applications. This allows us to access the application from outside the container when it is running.
 EXPOSE 8081
