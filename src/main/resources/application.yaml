@@ -1,0 +1,72 @@
+spring:
+  application:
+    name: peer-study
+
+# This is the configuration for the datasource. We are using PostgreSQL as our database, and we need to provide the connection details such as URL, username, password, and driver class name.
+# Note that in a real application, we would typically use environment variables or a secure vault to store sensitive information like database credentials, rather than hardcoding them in the configuration file.
+# Create postres database with name "mylocaldb" and user "mylocaldb" with password "mylocaldb" before running the application Otherwise COMMENT OUT the datasource configuration below to avoid connection errors.
+# Incase no Local PostgreSQL database is available, Comment this datasource and removed the dependency for PostgreSQL driver in the pom.xml file to avoid connection errors.
+# ${SPRING_DATASOURCE_URL} is an environment variable that can be set in the docker-compose.yml file or in the local environment(.env) when running the application locally, realtime(Test/Production) this values set inside the FLUX config or ConfigServer.
+# If the environment variable is not set, it will default to "jdbc:postgresql://localhost:5432/mylocaldb". Similarly, ${SPRING_DATASOURCE_USERNAME} and ${SPRING_DATASOURCE_PASSWORD}.
+# This allows for flexibility in configuring the database connection details without hardcoding them in the configuration file.
+
+
+#  datasource:
+#    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/mylocaldb}
+#    username: ${SPRING_DATASOURCE_USERNAME:mylocaldb}
+#    password: ${SPRING_DATASOURCE_PASSWORD:mylocaldb}
+#    driver-class-name: org.postgresql.Driver
+
+
+# Comment this b/c application will pick up the database connection details from `docker-compose.yml` file and use them to connect to the PostgreSQL database when running inside the Docker container.
+# These details are optional when running the application locally with a local PostgreSQL database, but they are necessary when running the application inside the Docker container to connect to the PostgreSQL database running in the "db" service defined in the `docker-compose.yml` file.
+# This allows the application to connect to the PostgreSQL database running in the "db" service defined in the docker-compose.yml file without hardcoding the connection details in the configuration file.
+# Make sure to set the environment variables SPRING_DATASOURCE_URL, SPRING_DATASOURCE_USERNAME, and SPRING_DATASOURCE_PASSWORD in the docker-compose.yml file as shown in the example above.
+# Real time application, these details should be stored securely and not hardcoded in the configuration file. Consider using environment variables, a secure vault, or a secrets management tool to store sensitive information like database credentials in a production environment(ConfigServer/Flux Config).
+
+#  datasource:
+#    url: jdbc:postgresql://db:5432/peer_study_db
+#    username: postgres
+#    password: postgres
+#    driver-class-name: org.postgresql.Driver
+
+# Redis configuration. We are using Redis as our caching solution, and we need to provide the connection details such as host, port, and timeout.
+# Similar to the datasource configuration, we can use environment variables to provide these details when running the application locally or inside a Docker container.
+# This allows for flexibility and security in managing connection details without hardcoding them in the configuration file.
+# This is for Lcoal Redis instance (Already defined inside `docker-compose.yml`, make sure to have Redis installed and running on your local machine before running the application.
+# Otherwise, COMMENT OUT the Redis configuration below to avoid connection errors.
+
+#  data:
+#    redis:
+#      host: ${SPRING_DATA_REDIS_HOST:localhost}
+#      port: ${SPRING_DATA_REDIS_PORT:6379}
+#      timeout: 2s
+
+
+  jpa:
+    show-sql: true
+    hibernate:
+      ddl-auto: create-drop
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+
+# This is the server configuration. We set the port to 8081, but this can be changed if needed.
+# The default is 8080, but we want to avoid conflicts with other services that might be running on the same port.
+server:
+  port: 8081
+
+# This is for actuator endpoints, which are used for health checks and metrics. We want to expose all of them for now, but we can restrict this later if needed.
+# By default, only a few endpoints are exposed, so we need to explicitly include all of them. This is useful for monitoring and debugging purposes.
+management:
+  endpoints:
+    web:
+      exposure:
+        include: "*"
+    # This is the base path for all actuator endpoints. By default, it's "/actuator", but we can change it if we want to have a different structure for our API.
+    # For example, we could set it to "/monitoring" if we want to have
+    # all monitoring-related endpoints under a common path. For now, we'll keep it as "/actuator".
+    base-path: /actuator
+    prometheus:
+      enabled: true
+

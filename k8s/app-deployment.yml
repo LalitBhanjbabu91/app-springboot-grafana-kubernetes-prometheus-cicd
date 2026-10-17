@@ -1,0 +1,59 @@
+# ============================================================
+# Spring Boot Application - Kubernetes Deployment
+# ============================================================
+# Deploys the peer-study Spring Boot app as a Pod inside a ReplicaSet.
+# The Deployment controller ensures the desired number of replicas are always running and handles rolling updates / rollbacks.
+# ============================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: lalit-biswajit-testing
+  labels:
+    app: lalit-biswajit-testing
+spec:
+  replicas: 3  # Run 2 identical Pods for basic high-availability
+  selector:
+    matchLabels:
+      app: lalit-biswajit-testing
+  template:
+    metadata:
+      labels:
+        app: lalit-biswajit-testing
+    spec:
+      containers:
+        - name: lalit-biswajit-testing
+          #image: yourusername/image:tag      # Replace with your Docker Hub image
+          image: lalitkumar91/lalitbiswajittesting:0.0.2
+          #image: peer-study:latest           # Local Build Image, <docker build -t peer-study:latest .>
+          imagePullPolicy: IfNotPresent       # or [IfNotPresent, Always, Never], for Remote pull
+          ports:
+            - containerPort: 8081   # Port the app listens on inside the container
+          env:
+            - name: SPRING_DATASOURCE_URL
+              value: jdbc:postgresql://postgres-service:5432/peer_study_db
+            - name: SPRING_DATASOURCE_USERNAME
+              value: testuser
+            - name: SPRING_DATASOURCE_PASSWORD
+              value: testpassword
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+         # It checks the application is ready to receive the traffic IfNot then restart the container
+          readinessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8081
+            initialDelaySeconds: 60
+            periodSeconds: 30
+          # It checks the pod is ready to receive the traffic, IFNot then remove the pod IP from service
+          livenessProbe:
+            httpGet:
+              path: /actuator/health
+              port: 8081
+            initialDelaySeconds: 60
+            periodSeconds: 30
+
