@@ -9,7 +9,7 @@
 		<relativePath/> <!-- lookup parent from repository -->
 	</parent>
 	<groupId>com.springGrafana</groupId>
-	<artifactId>Grafana</artifactId>
+	<artifactId>grafana</artifactId>
 	<version>0.0.1</version>
 	<name/>
 	<description/>
