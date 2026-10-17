@@ -1,0 +1,262 @@
+name: CI Process Push Release
+
+on:
+  pull_request:
+    branches: [ main ]
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]        # push v1.2.3 -> full pipeline -> release
+  release:
+    types: [ published ]
+  workflow_dispatch:
+
+env:
+  MAVEN_OPTS: -Dmaven.repo.local=${{ github.workspace }}/.m2/repository
+
+# Add permissions at the workflow level
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+  actions: read
+
+
+jobs:
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+
+    # Add permissions on the job level (more specific)
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
+      actions: read
+
+    strategy:
+      matrix:
+        java-version: [21]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch full history for better blame information
+
+      - name: Set up JDK ${{ matrix.java-version }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ matrix.java-version }}
+          distribution: 'temurin'
+          cache: maven    # replaces the manual Gradle cache step
+
+      - name: Grant execute permission for mvnw
+        run: chmod +x mvnw
+
+      - name: Run tests
+        run: ./mvnw -B test -Dspring.profiles.active=test
+
+      - name: Generate test report
+        uses: dorny/test-reporter@v1
+        if: success() || failure()
+        with:
+          name: Test Results (JDK ${{ matrix.java-version }})
+          path: '**/target/surefire-reports/TEST-*.xml'
+          reporter: java-junit
+          token: ${{ secrets.GITHUB_TOKEN }}
+          path-replace-backslashes: false
+          list-suites: all
+          list-tests: all
+          max-annotations: 10
+          fail-on-error: false
+          fail-on-empty: false
+          only-summary: false
+
+      # Simple test result upload without check runs
+      - name: Upload test results (Fallback Option)
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results-jdk-${{ matrix.java-version }}
+          path: |
+            **/target/surefire-reports/
+            **/target/failsafe-reports/
+          retention-days: 30
+
+  code-quality:
+    name: Code Quality
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Grant execute permission for mvnw
+        run: chmod +x mvnw
+
+      - name: Run Checkstyle (Code Style)
+        run: ./mvnw -B checkstyle:check
+        continue-on-error: true
+
+      - name: Run SpotBugs (Static Analysis)
+        run: ./mvnw -B compile spotbugs:check
+        continue-on-error: true
+
+      - name: Upload code quality results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: code-quality-results
+          path: |
+            **/target/checkstyle-result.xml
+            **/target/spotbugsXml.xml
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    needs: [test, code-quality]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Grant execute permission for mvnw
+        run: chmod +x mvnw
+
+      # Tests already ran in the test job. With spring-boot-maven-plugin this
+      # produces the executable fat JAR, so no separate shadowJar step is needed.
+      - name: Build project
+        run: ./mvnw -B clean package -DskipTests
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: jar-artifacts
+          path: |
+            target/*.jar
+            !target/*-sources.jar
+            !target/*-javadoc.jar
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Grant execute permission for mvnw
+        run: chmod +x mvnw
+
+      - name: Run dependency vulnerability scan
+        run: ./mvnw -B org.owasp:dependency-check-maven:check || echo "OWASP dependency check failed or not configured"
+        continue-on-error: true
+        env:
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+
+      - name: Upload security scan results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: security-scan-results
+          path: '**/target/dependency-check-report.*'
+
+  deploy:
+    name: Build Docker Image and Push Docker Hub
+    runs-on: ubuntu-latest
+    needs: [test, build, security-scan]
+    if: ${{ !cancelled() && needs.test.result == 'success' && needs.build.result == 'success' && needs['security-scan'].result != 'failure' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # The Dockerfile does COPY target/*.jar, so the jar must exist in ./target
+      # before docker build. This job starts on a fresh runner, so download it here.
+      - name: Download JAR from build job
+        uses: actions/download-artifact@v4
+        with:
+          name: jar-artifacts
+          path: target
+
+      - name: Build the Docker image
+        run: docker build . -t rockysahoo/github-action-project-cicd:$(date +%Y%m)
+
+      - run: echo "${{secrets.DOCKERHUB_PASSWORD}}" | docker login -u ${{secrets.DOCKERHUB_USERNAME}} --password-stdin #GitHub_Repository_Home -> Settings -> Secrets & Variable -> Actions
+
+      - name: Push the Docker Image
+        run: docker push rockysahoo/github-action-project-cicd:$(date +%Y%m)
+
+
+  publish:
+    name: Publish
+    runs-on: ubuntu-latest
+    needs: [deploy]
+    if: ${{ needs.deploy.result == 'success' }}
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: maven
+          server-id: github                 # must match <distributionManagement> id in pom.xml
+          server-username: MAVEN_USERNAME
+          server-password: MAVEN_PASSWORD
+
+      - name: Grant execute permission for mvnw
+        run: chmod +x mvnw
+
+      - name: Publish to GitHub Packages
+        run: ./mvnw -B deploy -DskipTests
+        env:
+          MAVEN_USERNAME: ${{ github.actor }}
+          MAVEN_PASSWORD: ${{ secrets.MY_TOKEN_ALL_PERMISSION }}
+
+      - name: Download JARs from build job
+        uses: actions/download-artifact@v4
+        with:
+          name: jar-artifacts
+          path: artifacts
+
+      - name: Create GitHub Release with JAR
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('v0.0.0-build.{0}', github.run_number) }}
+          name: Release ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || format('v0.0.0-build.{0}', github.run_number) }}
+          prerelease: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+          generate_release_notes: true
+          files: artifacts/**/*.jar
+        env:
+          GITHUB_TOKEN: ${{ secrets.MY_TOKEN_ALL_PERMISSION }}
